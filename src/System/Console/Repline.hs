@@ -144,10 +144,10 @@ module System.Console.Repline
     abort,
     tryAction,
     dontCrash,
+    restOfLine
   )
 where
 
-import Data.Void
 import Control.Applicative
 import Control.Monad.Catch
 import Control.Monad.Fail as Fail
@@ -263,10 +263,11 @@ abort = throwM H.Interrupt
 
 type ReplHandler m a = a -> HaskelineT m ()
 
-noOptionsParser :: O.Parser Void
-noOptionsParser = empty
-
--- TODO: add Parser for non-prefixed commands
+-- TODO: I don't think this is correct but it'll be a place holder for now
+-- | Parse the rest of the line as a single string. Use this as a catch all
+-- if no commands are given
+restOfLine :: O.Parser String
+restOfLine = unwords <$> (many $ O.strArgument mempty)
 
 -- | Completion loop.
 replLoop ::
@@ -284,13 +285,14 @@ replLoop promptPrefix optsParser handler = loop
       prefix <- promptPrefix
       minput <- H.handleInterrupt (return $ Just "") $ getInputLine prefix
       case minput of
-        Nothing -> outputStrLn "Goodbye."
-        Just line 
-          | cmds <- words line
-          , not (null cmds) -> 
-                H.handleInterrupt (return ())
-              $ forM_ (runOptsParser optsParser cmds) handler
-        _ -> loop
+        Nothing   -> outputStrLn "Goodbye."
+        Just line -> handleLine (words line)
+
+    handleLine [] = loop
+    handleLine cmds = H.handleInterrupt (pure ()) $ do
+      maybe (liftIO . putStrLn $ "Parser error on input: " <> (unwords cmds)) handler
+        $ runOptsParser optsParser cmds
+      loop
 
 -- | Run the Parser.
 -- TODO: add properly handling parse failures to display help text
