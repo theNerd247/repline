@@ -125,7 +125,7 @@ module System.Console.Repline
     evalReplOpts,
 
     -- * Repline Types
-    Options,
+    Options (..),
     WordCompleter,
     LineCompleter,
     CompleterStyle (..),
@@ -219,18 +219,6 @@ data Options m a = Options
   { optParser  :: O.Parser a
   , optHandler :: a -> m ()
   }
-
-instance (Alternative m) => Semigroup (Options m a) where
-  ops1 <> ops2 = Options 
-    { optParser = optParser ops1 <|> optParser ops2
-    , optHandler = \a -> (optHandler ops1 $ a) <|> (optHandler ops2 $ a)
-    }
-
-instance (Alternative m) => Monoid (Options m a) where
-  mempty = Options
-    { optParser  = empty
-    , optHandler = const $ pure ()
-    }
 
 -- | Command function synonym
 type Command m = String -> m ()
