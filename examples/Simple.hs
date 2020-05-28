@@ -28,22 +28,35 @@ data Cmds
   | Echo String
   | Quit
 
-cmdsPInfo = O.info cmdsP O.fullDesc
+cmdsPInfo = O.info (cmdsP <**> O.helper) O.fullDesc
 
 cmdsP :: O.Parser Cmds
 cmdsP = 
-      O.hsubparser (helpP <> sayP <> quitP)
- <|> Echo <$> restOfLine
+    O.hsubparser (helpP <> sayP <> quitP)
+ <|> echoP
+
+echoP = Echo <$> restOfLine O.hidden
 
 helpP = O.command ":help" 
   $ O.info 
-    (fmap Help $ O.strArgument $ O.help "the command to show help for"
+    (fmap Help 
+      $ O.strArgument 
+      $ O.help "the command to show help for"
+        <> O.metavar "CMD"
     ) 
-  $ O.progDesc "Show help text"
+  $ O.progDesc "Display help for a command"
 
-sayP = O.command ":say" $ O.info (fmap Say $ restOfLine) mempty
+sayP = O.command ":say" 
+  $ O.info 
+    (fmap Say 
+      $ restOfLine
+      $ O.help "Text to cowsay" <> O.metavar "TEXT"
+    ) 
+  $ O.progDesc "Display a cowsay"
 
-quitP = O.command ":quit" $ O.info (pure Quit) mempty
+quitP = O.command ":quit" 
+  $ O.info (pure Quit) 
+  $ O.progDesc "Quit the repl"
 
 cmdsHandler (Help str) = help_ str
 cmdsHandler (Say str)  = say_ str

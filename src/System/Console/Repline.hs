@@ -266,8 +266,8 @@ type ReplHandler m a = a -> HaskelineT m ()
 -- TODO: I don't think this is correct but it'll be a place holder for now
 -- | Parse the rest of the line as a single string. Use this as a catch all
 -- if no commands are given
-restOfLine :: O.Parser String
-restOfLine = unwords <$> (many $ O.strArgument mempty)
+restOfLine :: O.Mod O.ArgumentFields String -> O.Parser String
+restOfLine = O.argument (unwords <$> many O.str)
 
 -- | Completion loop.
 replLoop ::
@@ -289,19 +289,25 @@ replLoop promptPrefix optsParser handler = loop
         Just line -> handleLine (words line)
 
     handleLine [] = loop
-    handleLine cmds = H.handleInterrupt (pure ()) $ do
-      runOptsParser optsParser cmds
-      loop
+    handleLine cmds = H.handleInterrupt (pure ()) $ (runOptsParser cmds >> loop)
+      where
 
-    runOptsParser parserInfo = 
-        handleParserResult
-      . O.execParserPure O.defaultPrefs parserInfo
+        runOptsParser = 
+            handleParserResult
+          . O.execParserPure parserPrefs optsParser
 
-    handleParserResult (O.Success x)    = handler x
-    handleParserResult (O.Failure help) = liftIO . putStrLn . fst $ O.renderFailure help ""
-    -- | TODO: add support for tab completion from optparse-applicative (this
-    -- may rid us of the Haskeline completion?)
-    handleParserResult _                = pure ()
+        parserPrefs = O.prefs
+           $ O.showHelpOnError
+          <> O.showHelpOnEmpty
+          <> O.disambiguate
+
+        handleParserResult (O.Success x)    = handler x
+        handleParserResult (O.Failure help) = do
+          liftIO . putStrLn $ "Parser failed with: " <> (unwords cmds)
+          liftIO . putStrLn . fst $ O.renderFailure help ""
+        -- | TODO: add support for tab completion from optparse-applicative (this
+        -- may rid us of the Haskeline completion?)
+        handleParserResult _                = pure ()
 
 -------------------------------------------------------------------------------
 -- Toplevel
