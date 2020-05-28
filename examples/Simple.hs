@@ -25,30 +25,32 @@ completer n = do
 data Cmds
   = Help String
   | Say String
+  | Echo String
+  | Quit
 
-opts :: Options Repl Cmds
-opts = Options
-  { optParser
-       =  Help <$> optParser help_ 
-      <|> Say <$> optParser say_
-  , optHandler = \case 
-      (Help str) -> optHandler help_ str
-      (Say str)  -> optHandler say_ str
-  }
+cmdsPInfo = O.info cmdsP mempty
 
-help_ :: Options Repl String
-help_ = Options
-  { optParser  = O.subparser $ O.command "help" (O.info (O.strArgument mempty) mempty)
-  , optHandler = liftIO . print . ("Help: " ++) 
-  }
+cmdsP :: O.Parser Cmds
+cmdsP = 
+      O.hsubparser (helpP <> sayP <> quitP)
+ <|> Echo <$> restOfLine
 
-say_ :: Options Repl String
-say_ = Options
-  { optParser  = O.subparser $ O.command "say" (O.info (O.strArgument mempty) mempty)
-  , optHandler = \args -> do
-      liftIO $ callCommand $ "cowsay" ++ " " ++ args
-      return ()
-  }
+helpP = O.command ":help" $ O.info (fmap Help $ O.strArgument mempty) mempty
+
+sayP = O.command ":say" $ O.info (fmap Say $ restOfLine) mempty
+
+quitP = O.command ":quit" $ O.info (pure Quit) mempty
+
+cmdsHandler (Help str) = help_ str
+cmdsHandler (Say str)  = say_ str
+cmdsHandler (Echo str) = echo_ str
+cmdsHandler Quit       = abort
+
+help_ = liftIO . print . ("Help: " ++) 
+
+say_ = liftIO . callCommand . ("cowsay" ++) . (" " ++) 
+
+echo_ = liftIO . putStrLn . ("echo: " ++)
 
 -- opts :: [(String, [String] -> Repl ())]
 -- opts =
@@ -59,18 +61,14 @@ say_ = Options
 ini :: Repl ()
 ini = liftIO $ putStrLn "Welcome!"
 
-repl_alt :: IO ()
-repl_alt = evalReplOpts $ ReplOpts
-  { banner      = pure ">>> "
-  , command     = cmd
-  , options     = opts
-  , prefix      = Just ':'
+repl :: IO ()
+repl = evalReplOpts $ ReplOpts
+  { prefix      = pure ">>> "
+  , optsParser  = cmdsPInfo
+  , replHandler = cmdsHandler
   , tabComplete = (Word0 completer)
   , initialiser = ini
   }
-
-repl :: IO ()
-repl = evalRepl (pure ">>> ") cmd opts (Just ':') (Word0 completer) ini
 
 main :: IO ()
 main = pure ()
