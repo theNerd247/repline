@@ -52,6 +52,7 @@ library
     , haskeline   >=0.8  && <0.9
     , mtl         >=2.2  && <2.3
     , process     >=1.2  && <2.0
+    , optparse-applicative
 
   if !impl(ghc >=8.0)
     build-depends: fail ==4.9.*
