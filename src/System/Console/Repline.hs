@@ -148,6 +148,7 @@ module System.Console.Repline
   )
 where
 
+import Control.Applicative
 import Control.Monad.Catch
 import Control.Monad.Fail as Fail
 import Control.Monad.Reader
@@ -219,6 +220,18 @@ data Options m a = Options
   , optHandler :: a -> m ()
   }
 
+instance (Alternative m) => Semigroup (Options m a) where
+  ops1 <> ops2 = Options 
+    { optParser = optParser ops1 <|> optParser ops2
+    , optHandler = \a -> (optHandler ops1 $ a) <|> (optHandler ops2 $ a)
+    }
+
+instance (Alternative m) => Monoid (Options m a) where
+  mempty = Options
+    { optParser  = empty
+    , optHandler = const $ pure ()
+    }
+
 -- | Command function synonym
 type Command m = String -> m ()
 
@@ -248,6 +261,10 @@ replLoop ::
   -- | banner function
   HaskelineT m String ->
   -- | command function
+  -- TODO: we can remove this and integrate it into the Options by providing a
+  -- wrapper type that acts as a catch all. Then the prefix logic for options
+  -- can be provided as a combinator that adds the prefix to the command name.
+  -- E.g. ("help", ...) would become Option { optParser = subcommand (command ":help" ...), ...}
   Command (HaskelineT m) ->
   -- | options function
   Options (HaskelineT m) a ->
