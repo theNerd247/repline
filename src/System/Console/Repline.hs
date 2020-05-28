@@ -58,6 +58,7 @@
 -- >   _ <- liftIO $ system $ "cowsay" ++ " " ++ (unwords args)
 -- >   return ()
 --
+-- TODO: replace with optparse-applicative style
 -- Now we need only map these functions to their commands.
 --
 -- > options :: [(String, [String] -> Repl ())]
@@ -124,7 +125,6 @@ module System.Console.Repline
     evalReplOpts,
 
     -- * Repline Types
-    Cmd,
     Options,
     WordCompleter,
     LineCompleter,
@@ -155,6 +155,7 @@ import Control.Monad.State.Strict
 import Data.List (isPrefixOf)
 import qualified System.Console.Haskeline as H
 import System.Console.Haskeline.Completion
+import qualified Options.Applicative as O
 
 -------------------------------------------------------------------------------
 -- Haskeline Transformer
@@ -212,11 +213,11 @@ instance (MonadHaskeline m) => MonadHaskeline (StateT s m) where
 -- Repl
 -------------------------------------------------------------------------------
 
--- | Command function synonym
-type Cmd m = [String] -> m ()
-
 -- | Options function synonym
-type Options m = [(String, Cmd m)]
+data Options m a = Options
+  { optParser  :: O.Parser a
+  , optHandler :: a -> m ()
+  }
 
 -- | Command function synonym
 type Command m = String -> m ()
@@ -249,7 +250,7 @@ replLoop ::
   -- | command function
   Command (HaskelineT m) ->
   -- | options function
-  Options (HaskelineT m) ->
+  Options (HaskelineT m) a ->
   -- | options prefix
   Maybe Char ->
   HaskelineT m ()
@@ -276,26 +277,27 @@ replLoop banner cmdM opts optsPrefix = loop
     handleInput input = H.handleInterrupt exit $ cmdM input
     exit = return ()
 
+-- TODO: replace with optparse-applicative
 -- | Match the options.
-optMatcher :: MonadHaskeline m => String -> Options m -> [String] -> m ()
-optMatcher s [] _ = outputStrLn $ "No such command :" ++ s
-optMatcher s ((x, m) : xs) args
-  | s `isPrefixOf` x = m args
-  | otherwise = optMatcher s xs args
+optMatcher :: MonadHaskeline m => String -> Options m a -> [String] -> m ()
+optMatcher s Options{..} args = 
+  maybe (pure ()) optHandler 
+  $ O.getParseResult 
+  $ O.execParserPure O.defaultPrefs (O.info optParser O.fullDesc) (s:args)
 
 -------------------------------------------------------------------------------
 -- Toplevel
 -------------------------------------------------------------------------------
 
 -- | REPL Options datatype
-data ReplOpts m
+data ReplOpts m a
   = ReplOpts
       { -- | Banner
         banner :: HaskelineT m String,
         -- | Command function
         command :: Command (HaskelineT m),
         -- | Options list and commands
-        options :: Options (HaskelineT m),
+        options :: Options (HaskelineT m) a,
         -- | Optional command prefix ( passing Nothing ignores the Options argument )
         prefix :: Maybe Char,
         -- | Tab completion function
@@ -306,7 +308,7 @@ data ReplOpts m
 
 -- | Evaluate the REPL logic into a MonadCatch context from the ReplOpts
 -- configuration.
-evalReplOpts :: (MonadMask m, MonadIO m) => ReplOpts m -> m ()
+evalReplOpts :: (MonadMask m, MonadIO m) => ReplOpts m a -> m ()
 evalReplOpts ReplOpts {..} =
   evalRepl
     banner
@@ -325,7 +327,7 @@ evalRepl ::
   -- | Command function
   Command (HaskelineT m) ->
   -- | Options list and commands
-  Options (HaskelineT m) ->
+  Options (HaskelineT m) o ->
   -- | Optional command prefix ( passing Nothing ignores the Options argument )
   Maybe Char ->
   -- | Tab completion function
