@@ -44,7 +44,7 @@ source-repository head
 library
   hs-source-dirs:   src
   exposed-modules:  System.Console.Repline
-  ghc-options:      -Wall
+--  ghc-options:      -Wall
   build-depends:
       base        >=4.6  && <5.0
     , containers  >=0.5  && <0.7

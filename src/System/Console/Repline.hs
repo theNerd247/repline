@@ -299,6 +299,8 @@ replLoop promptPrefix optsParser handler = loop
 
     handleParserResult (O.Success x)    = handler x
     handleParserResult (O.Failure help) = liftIO . putStrLn . fst $ O.renderFailure help ""
+    -- | TODO: add support for tab completion from optparse-applicative (this
+    -- may rid us of the Haskeline completion?)
     handleParserResult _                = pure ()
 
 -------------------------------------------------------------------------------

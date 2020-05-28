@@ -28,14 +28,18 @@ data Cmds
   | Echo String
   | Quit
 
-cmdsPInfo = O.info cmdsP mempty
+cmdsPInfo = O.info cmdsP O.fullDesc
 
 cmdsP :: O.Parser Cmds
 cmdsP = 
       O.hsubparser (helpP <> sayP <> quitP)
  <|> Echo <$> restOfLine
 
-helpP = O.command ":help" $ O.info (fmap Help $ O.strArgument mempty) mempty
+helpP = O.command ":help" 
+  $ O.info 
+    (fmap Help $ O.strArgument $ O.help "the command to show help for"
+    ) 
+  $ O.progDesc "Show help text"
 
 sayP = O.command ":say" $ O.info (fmap Say $ restOfLine) mempty
 
