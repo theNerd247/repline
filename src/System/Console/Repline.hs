@@ -290,16 +290,16 @@ replLoop promptPrefix optsParser handler = loop
 
     handleLine [] = loop
     handleLine cmds = H.handleInterrupt (pure ()) $ do
-      maybe (liftIO . putStrLn $ "Parser error on input: " <> (unwords cmds)) handler
-        $ runOptsParser optsParser cmds
+      runOptsParser optsParser cmds
       loop
 
--- | Run the Parser.
--- TODO: add properly handling parse failures to display help text
-runOptsParser :: O.ParserInfo a -> [String] -> Maybe a
-runOptsParser parserInfo = 
-    O.getParseResult 
-  . O.execParserPure O.defaultPrefs parserInfo
+    runOptsParser parserInfo = 
+        handleParserResult
+      . O.execParserPure O.defaultPrefs parserInfo
+
+    handleParserResult (O.Success x)    = handler x
+    handleParserResult (O.Failure help) = liftIO . putStrLn . fst $ O.renderFailure help ""
+    handleParserResult _                = pure ()
 
 -------------------------------------------------------------------------------
 -- Toplevel
