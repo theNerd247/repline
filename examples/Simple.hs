@@ -1,11 +1,15 @@
+{-# LANGUAGE LambdaCase #-}
+
 module Main (main, repl) where
 
+import Control.Applicative
 import Control.Monad.Trans
 import Data.List (isPrefixOf)
 import System.Console.Repline
 import System.Process (callCommand)
+import qualified Options.Applicative as O
 
-type Repl a = HaskelineT IO a
+type Repl = HaskelineT IO 
 
 -- Evaluation : handle each line user inputs
 cmd :: String -> Repl ()
@@ -18,19 +22,39 @@ completer n = do
   return $ filter (isPrefixOf n) names
 
 -- Commands
-help :: [String] -> Repl ()
-help args = liftIO $ print $ "Help: " ++ show args
+data Cmds
+  = Help String
+  | Say String
 
-say :: [String] -> Repl ()
-say args = do
-  _ <- liftIO $ callCommand $ "cowsay" ++ " " ++ (unwords args)
-  return ()
+opts :: Options Repl Cmds
+opts = Options
+  { optParser
+       =  Help <$> optParser help_ 
+      <|> Say <$> optParser say_
+  , optHandler = \case 
+      (Help str) -> optHandler help_ str
+      (Say str)  -> optHandler say_ str
+  }
 
-opts :: [(String, [String] -> Repl ())]
-opts =
-  [ ("help", help), -- :help
-    ("say", say) -- :say
-  ]
+help_ :: Options Repl String
+help_ = Options
+  { optParser  = O.subparser $ O.command "help" (O.info (O.strArgument mempty) mempty)
+  , optHandler = liftIO . print . ("Help: " ++) 
+  }
+
+say_ :: Options Repl String
+say_ = Options
+  { optParser  = O.subparser $ O.command "say" (O.info (O.strArgument mempty) mempty)
+  , optHandler = \args -> do
+      liftIO $ callCommand $ "cowsay" ++ " " ++ args
+      return ()
+  }
+
+-- opts :: [(String, [String] -> Repl ())]
+-- opts =
+--   [ ("help", help), -- :help
+--     ("say", say) -- :say
+--   ]
 
 ini :: Repl ()
 ini = liftIO $ putStrLn "Welcome!"
