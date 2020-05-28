@@ -215,6 +215,25 @@ instance (MonadHaskeline m) => MonadHaskeline (StateT s m) where
 -------------------------------------------------------------------------------
 
 -- | Options function synonym
+-- TODO: add combinators to combine Options. As a note:
+-- Parser is an Alternative 
+-- a -> m () is a contravariant functor.
+--
+-- For manual combination:
+--
+-- For sum types <|>, and case can be used 
+--
+--  { optParser = A <$> aOpt <|> B <$> bOpt
+--  , optHandler = \case
+--       (A (xs...)) -> optHandler aOpt xs...
+--       (B (xs...)) -> optHandler bOpt xs...
+--  }
+--
+-- For prd type (<$>, <*>), and >> can be used
+--
+--  { optParser = AB <$> aOpt <*> bOpt
+--  , optHandler = \(AB a b) -> optHandler aOpt a >> optHandler bOpt b
+--  }
 data Options m a = Options
   { optParser  :: O.Parser a
   , optHandler :: a -> m ()
