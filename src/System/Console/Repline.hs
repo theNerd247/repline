@@ -67,7 +67,7 @@
 -- >   , ("say", say)    -- :say
 -- >   ]
 --
--- The banner function is simply an IO action that is called at the start of the shell.
+-- The prefix function is simply an IO action that is called at the start of the shell.
 --
 -- > ini :: Repl ()
 -- > ini = liftIO $ putStrLn "Welcome!"
@@ -82,7 +82,7 @@
 --
 -- > main_alt :: IO ()
 -- > main_alt = evalReplOpts $ ReplOpts
--- >   { banner      = pure ">>> "
+-- >   { prefix      = pure ">>> "
 -- >   , command     = cmd
 -- >   , options     = opts
 -- >   , prefix      = Just ':'
@@ -125,11 +125,10 @@ module System.Console.Repline
     evalReplOpts,
 
     -- * Repline Types
-    Options (..),
+    ReplHandler,
     WordCompleter,
     LineCompleter,
     CompleterStyle (..),
-    Command,
 
     -- * Completers
     CompletionFunc, -- re-export
@@ -148,6 +147,7 @@ module System.Console.Repline
   )
 where
 
+import Data.Void
 import Control.Applicative
 import Control.Monad.Catch
 import Control.Monad.Fail as Fail
@@ -223,7 +223,7 @@ instance (MonadHaskeline m) => MonadHaskeline (StateT s m) where
 --
 -- For sum types <|>, and case can be used 
 --
---  { optParser = A <$> aOpt <|> B <$> bOpt
+--  { optsParser = A <$> aOpt <|> B <$> bOpt
 --  , optHandler = \case
 --       (A (xs...)) -> optHandler aOpt xs...
 --       (B (xs...)) -> optHandler bOpt xs...
@@ -231,16 +231,15 @@ instance (MonadHaskeline m) => MonadHaskeline (StateT s m) where
 --
 -- For prd type (<$>, <*>), and >> can be used
 --
---  { optParser = AB <$> aOpt <*> bOpt
+--  { optsParser = AB <$> aOpt <*> bOpt
 --  , optHandler = \(AB a b) -> optHandler aOpt a >> optHandler bOpt b
 --  }
-data Options m a = Options
-  { optParser  :: O.Parser a
-  , optHandler :: a -> m ()
-  }
-
--- | Command function synonym
-type Command m = String -> m ()
+--
+--  I've decided that I need to split up the parser and the cmd handler
+--  as parsers are composable however it is not straight forward on how 
+--  handlers should be parsed. E.g sum types could be handled as: C -> m ()
+--  or (a -> m ()) >> (b -> m ()); either way could make sense depending 
+--  on the user.
 
 -- | Word completer
 type WordCompleter m = (String -> m [String])
@@ -262,52 +261,43 @@ dontCrash m = catch m (\e@SomeException {} -> liftIO (print e))
 abort :: MonadThrow m => HaskelineT m a
 abort = throwM H.Interrupt
 
+type ReplHandler m a = a -> HaskelineT m ()
+
+noOptionsParser :: O.Parser Void
+noOptionsParser = empty
+
+-- TODO: add Parser for non-prefixed commands
+
 -- | Completion loop.
 replLoop ::
-  (Functor m, MonadMask m, MonadIO m) =>
-  -- | banner function
-  HaskelineT m String ->
-  -- | command function
-  -- TODO: we can remove this and integrate it into the Options by providing a
-  -- wrapper type that acts as a catch all. Then the prefix logic for options
-  -- can be provided as a combinator that adds the prefix to the command name.
-  -- E.g. ("help", ...) would become Option { optParser = subcommand (command ":help" ...), ...}
-  Command (HaskelineT m) ->
-  -- | options function
-  Options (HaskelineT m) a ->
-  -- | options prefix
-  Maybe Char ->
-  HaskelineT m ()
-replLoop banner cmdM opts optsPrefix = loop
+  (MonadMask m, MonadIO m) 
+  => HaskelineT m String 
+  -- ^ prompt prefix
+  -> O.ParserInfo a 
+  -- ^ Parser for custom options
+  -> ReplHandler m a
+  -- ^ Handler for the top-level ReplCmd
+  -> HaskelineT m ()
+replLoop promptPrefix optsParser handler = loop
   where
     loop = do
-      prefix <- banner
-      minput <- H.handleInterrupt (return (Just "")) $ getInputLine prefix
+      prefix <- promptPrefix
+      minput <- H.handleInterrupt (return $ Just "") $ getInputLine prefix
       case minput of
         Nothing -> outputStrLn "Goodbye."
-        Just "" -> loop
-        Just (prefix_ : cmds)
-          | null cmds -> handleInput [prefix_] >> loop
-          | Just prefix_ == optsPrefix ->
-            case words cmds of
-              [] -> loop
-              (cmd : args) -> do
-                let optAction = optMatcher cmd opts args
-                result <- H.handleInterrupt (return Nothing) $ Just <$> optAction
-                maybe exit (const loop) result
-        Just input -> do
-          handleInput input
-          loop
-    handleInput input = H.handleInterrupt exit $ cmdM input
-    exit = return ()
+        Just line 
+          | cmds <- words line
+          , not (null cmds) -> 
+                H.handleInterrupt (return ())
+              $ forM_ (runOptsParser optsParser cmds) handler
+        _ -> loop
 
--- TODO: replace with optparse-applicative
--- | Match the options.
-optMatcher :: MonadHaskeline m => String -> Options m a -> [String] -> m ()
-optMatcher s Options{..} args = 
-  maybe (pure ()) optHandler 
-  $ O.getParseResult 
-  $ O.execParserPure O.defaultPrefs (O.info optParser O.fullDesc) (s:args)
+-- | Run the Parser.
+-- TODO: add properly handling parse failures to display help text
+runOptsParser :: O.ParserInfo a -> [String] -> Maybe a
+runOptsParser parserInfo = 
+    O.getParseResult 
+  . O.execParserPure O.defaultPrefs parserInfo
 
 -------------------------------------------------------------------------------
 -- Toplevel
@@ -316,18 +306,16 @@ optMatcher s Options{..} args =
 -- | REPL Options datatype
 data ReplOpts m a
   = ReplOpts
-      { -- | Banner
-        banner :: HaskelineT m String,
-        -- | Command function
-        command :: Command (HaskelineT m),
-        -- | Options list and commands
-        options :: Options (HaskelineT m) a,
-        -- | Optional command prefix ( passing Nothing ignores the Options argument )
-        prefix :: Maybe Char,
-        -- | Tab completion function
-        tabComplete :: CompleterStyle m,
-        -- | Initialiser
-        initialiser :: HaskelineT m ()
+      { prefix :: HaskelineT m String
+        -- ^ Banner
+      , optsParser :: O.ParserInfo a
+        -- ^ repl options parser
+      , replHandler :: ReplHandler m a  
+        -- ^ repl handler
+      , tabComplete :: CompleterStyle m
+        -- ^ Tab completion function
+      , initialiser :: HaskelineT m ()
+        -- ^ Initialiser
       }
 
 -- | Evaluate the REPL logic into a MonadCatch context from the ReplOpts
@@ -335,38 +323,35 @@ data ReplOpts m a
 evalReplOpts :: (MonadMask m, MonadIO m) => ReplOpts m a -> m ()
 evalReplOpts ReplOpts {..} =
   evalRepl
-    banner
-    command
-    options
     prefix
+    optsParser
+    replHandler
     tabComplete
     initialiser
 
 -- | Evaluate the REPL logic into a MonadCatch context.
 evalRepl ::
-  (MonadMask m, MonadIO m) => -- Terminal monad ( often IO ).
-
-  -- | Banner
-  HaskelineT m String ->
-  -- | Command function
-  Command (HaskelineT m) ->
-  -- | Options list and commands
-  Options (HaskelineT m) o ->
-  -- | Optional command prefix ( passing Nothing ignores the Options argument )
-  Maybe Char ->
-  -- | Tab completion function
-  CompleterStyle m ->
-  -- | Initialiser
-  HaskelineT m a ->
-  m ()
-evalRepl banner cmd opts optsPrefix comp initz = runHaskelineT _readline (initz >> monad)
+  (MonadMask m, MonadIO m) -- Terminal monad ( often IO ).
+  => HaskelineT m String 
+  -- ^ prompt prefix
+  -> O.ParserInfo a
+  -- ^ parser info describing how to parse input
+  -> ReplHandler m a
+  -- ^ Repl handler
+  -> CompleterStyle m 
+  -- ^ Tab completion function
+  -> HaskelineT m b
+  -- ^ Initialiser
+  -> m ()
+evalRepl prefix parser handler completer initz = 
+  runHaskelineT _readline $ initz >> monad
   where
-    monad = replLoop banner cmd opts optsPrefix
+    monad = replLoop prefix parser handler
     _readline =
       H.Settings
-        { H.complete = mkCompleter comp,
-          H.historyFile = Just ".history",
-          H.autoAddHistory = True
+        { H.complete       = mkCompleter completer
+        , H.historyFile    = Just ".history"
+        , H.autoAddHistory = True
         }
 
 -------------------------------------------------------------------------------
